@@ -21,6 +21,7 @@ const shortcutColumns: TSetting[] = [
       { value: 'previousRow', label: 'Previous row (list)' },
       { value: 'nextItem', label: 'Next item (list)' },
       { value: 'previousItem', label: 'Previous item (list)' },
+      { value: 'openRow', label: 'Open selected row (list)' },
     ],
   },
   {
@@ -30,6 +31,12 @@ const shortcutColumns: TSetting[] = [
     placeholder: 'searchBox or .list',
   },
   { key: 'id', label: 'Name (On Shortcut)', type: ESetting.TEXT_FIELD, placeholder: 'newBooking' },
+  {
+    key: 'when',
+    label: 'Only when focus is in',
+    type: ESetting.TEXT_FIELD,
+    placeholder: 'searchBox (fires while typing there)',
+  },
   { key: 'disabled', label: 'Disabled', type: ESetting.CHECKBOX },
 ];
 

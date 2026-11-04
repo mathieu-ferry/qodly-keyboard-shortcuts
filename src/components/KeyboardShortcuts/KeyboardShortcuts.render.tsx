@@ -1,13 +1,30 @@
 import { useRenderer, useSources } from '@ws-ui/webform-editor';
 import { type FC, useEffect, useMemo, useRef } from 'react';
 
-import { clickTarget, focusTarget, type IShortcut, moveInList, trackLists } from './actions';
+import {
+  clickTarget,
+  focusTarget,
+  type IShortcut,
+  moveInList,
+  openRow,
+  toSelector,
+  trackLists,
+} from './actions';
 import type { IKeyboardShortcutsProps } from './KeyboardShortcuts.config';
 import { allowedWhileTyping, type ICombo, isTyping, matches, parseShortcut } from './keys';
 
 interface IScalarSource {
   setValue(path: null, value: unknown): Promise<void> | void;
 }
+
+// The focused element is inside the element(s) matching `when`
+const focusIsIn = (when: string) => {
+  try {
+    return !!(document.activeElement as Element | null)?.closest(toSelector(when.trim()));
+  } catch {
+    return false;
+  }
+};
 
 const SEQUENCE_DELAY = 1000; // ms between the keys of a sequence ("g b")
 
@@ -47,6 +64,8 @@ const KeyboardShortcuts: FC<IKeyboardShortcutsProps> = ({ shortcuts = [] }) => {
           return focusTarget(shortcut.target);
         case 'click':
           return clickTarget(shortcut.target);
+        case 'openRow':
+          return openRow(shortcut.target);
         case 'nextRow':
         case 'previousRow':
         case 'nextItem':
@@ -71,8 +90,11 @@ const KeyboardShortcuts: FC<IKeyboardShortcutsProps> = ({ shortcuts = [] }) => {
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
       const typing = isTyping(e);
       const candidates = (position > 0 ? pending : ref.current.parsed).filter(
-        ({ steps }) =>
-          matches(steps[position], e) && (!typing || allowedWhileTyping(steps[position])),
+        ({ steps, shortcut }) =>
+          matches(steps[position], e) &&
+          (shortcut.when
+            ? focusIsIn(shortcut.when) // scoped to a field: fires while typing in it
+            : !typing || allowedWhileTyping(steps[position])),
       );
       clearTimeout(timer);
       if (candidates.length === 0) {

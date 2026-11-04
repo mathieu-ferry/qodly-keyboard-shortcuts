@@ -7,13 +7,15 @@ export type TAction =
   | 'previousRow'
   | 'nextRow'
   | 'previousItem'
-  | 'nextItem';
+  | 'nextItem'
+  | 'openRow';
 
 export interface IShortcut {
   keys: string; // "mod+k", "g b", "arrowdown"
   action: TAction;
   target?: string; // CSS class ("bk_search") or selector (".bk_list", "#id", "[data-x]")
   id?: string; // name passed to the onShortcut event and written to the bound datasource
+  when?: string; // only while the focus is inside this element (CSS class or selector); then also while typing
   disabled?: boolean;
 }
 
@@ -22,7 +24,7 @@ const FOCUSABLE =
 const LISTS = '.fd-matrix, .fd-datatable';
 
 // A bare word is a CSS class; anything else (".a, .b input", "#id") is a selector
-const toSelector = (target: string) =>
+export const toSelector = (target: string) =>
   /^[.#[]/.test(target) || /[\s>:,]/.test(target) ? target : `.${target}`;
 
 export const isVisible = (el: Element) => {
@@ -78,18 +80,27 @@ export function clickTarget(target?: string): boolean {
 
 let lastList: Element | null = null;
 
-// The list a row move applies to when the shortcut names none: the last list clicked, else the only visible one
+// The list a row move applies to when the shortcut names none: the last list used, else the only visible one
 export function trackLists(e: Event) {
   const list = (e.target as Element | null)?.closest?.(LISTS);
   if (list) lastList = list;
 }
 
-function resolveList(target?: string): Element | null {
+// The lists a target names (a list, or an element holding several, e.g. a dropdown with sections) and the one
+// to move in: the last list used among them, else the first
+function resolveLists(target?: string): { lists: Element[]; list: Element | null } {
   const named = findTarget(target);
-  if (named) return named.matches(LISTS) ? named : named.querySelector(LISTS);
-  if (lastList?.isConnected && isVisible(lastList)) return lastList;
-  const visible = [...document.querySelectorAll(LISTS)].filter(isVisible);
-  return visible.length === 1 ? visible[0] : null;
+  let lists: Element[];
+  if (named) {
+    lists = named.matches(LISTS) ? [named] : [...named.querySelectorAll(LISTS)].filter(isVisible);
+  } else if (lastList?.isConnected && isVisible(lastList)) {
+    lists = [lastList];
+  } else {
+    const visible = [...document.querySelectorAll(LISTS)].filter(isVisible);
+    lists = visible.length === 1 ? visible : [];
+  }
+  const list = lists.find((l) => l === lastList) ?? lists[0] ?? null;
+  return { lists, list };
 }
 
 const rowsOf = (list: Element): HTMLElement[] =>
@@ -97,25 +108,34 @@ const rowsOf = (list: Element): HTMLElement[] =>
     .filter((r): r is HTMLElement => r instanceof HTMLElement && r.offsetHeight > 0)
     .sort((a, b) => a.offsetTop - b.offsetTop || a.offsetLeft - b.offsetLeft);
 
+const isSelected = (r: Element) =>
+  r.classList.contains('selected') || !!r.querySelector(':scope > .selected');
+
 const frame = () =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
+// Selects a row the way Qodly does on a click of the row itself: the list's On Select runs, the row's content
+// (and its own On Click) does not. openRow clicks the content.
+function selectRow(list: Element, scroller: HTMLElement, row: HTMLElement) {
+  reveal(scroller, row);
+  lastList = list;
+  row.click();
+}
+
 // Next or previous row (vertically: the cell below / above in a mosaic), or item (reading order). Rows are
-// virtualised: when the neighbour is not rendered yet, scroll by one row and look again.
+// virtualised: when the neighbour is not rendered yet, scroll by one row and look again. Past the end of a
+// list, moves on to the next list of the target (sections of a dropdown).
 export async function moveInList(
   target: string | undefined,
   step: 1 | -1,
   byRow: boolean,
 ): Promise<boolean> {
-  const list = resolveList(target);
+  const { lists, list } = resolveLists(target);
   const scroller = list?.querySelector('.innerScrollContainer')?.parentElement;
   if (!list || !scroller) return false;
   for (let attempt = 0; attempt < 4; attempt++) {
     const rows = rowsOf(list);
-    if (rows.length === 0) return false;
-    const current = rows.find(
-      (r) => r.classList.contains('selected') || r.querySelector(':scope > .selected'),
-    );
+    const current = rows.find(isSelected);
     let next: HTMLElement | undefined;
     if (!current) {
       // nothing selected (or scrolled away): the first row in view
@@ -139,18 +159,33 @@ export async function moveInList(
       next = rows[rows.indexOf(current) + step];
     }
     if (next) {
-      reveal(scroller, next);
-      // the row's content: its click bubbles to the row handler, as a mouse click would
-      ((next.firstElementChild as HTMLElement | null) ?? next).click();
+      selectRow(list, scroller, next);
       return true;
     }
     // neighbour not rendered: scroll one row and retry, unless already at the end
     const before = scroller.scrollTop;
     scroller.scrollTop += step * (current?.offsetHeight || 40);
-    if (scroller.scrollTop === before) return false;
+    if (scroller.scrollTop === before) break;
     await frame();
   }
-  return false;
+  // at the end of this list: the first (or last) row of the next (or previous) list of the target
+  const other = lists[lists.indexOf(list) + step];
+  const otherScroller = other?.querySelector('.innerScrollContainer')?.parentElement;
+  if (!other || !otherScroller) return false;
+  const rows = rowsOf(other);
+  const row = step > 0 ? rows[0] : rows[rows.length - 1];
+  if (!row) return false;
+  selectRow(other, otherScroller, row);
+  return true;
+}
+
+// Enter on a highlighted row: clicks its content, so the row's own On Click actions run
+export function openRow(target?: string): boolean {
+  const { list } = resolveLists(target);
+  const row = list ? rowsOf(list).find(isSelected) : undefined;
+  if (!row) return false;
+  ((row.firstElementChild as HTMLElement | null) ?? row).click();
+  return true;
 }
 
 function reveal(scroller: HTMLElement, row: HTMLElement) {

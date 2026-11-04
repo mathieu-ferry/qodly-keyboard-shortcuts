@@ -14,6 +14,7 @@ const LABELS: Record<string, string> = {
   previousRow: 'previous row',
   nextItem: 'next item',
   previousItem: 'previous item',
+  openRow: 'open row',
 };
 
 // Canvas: a small chip listing the shortcuts (invisible at runtime)
